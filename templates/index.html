@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crime Mapping</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet"> <!-- Bootstrap CSS -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBOEOlH4EMTDSART8_fSTtU_9uM8BooUeo&libraries=places,visualization"></script>
+    <style>
+        body {
+            background-color: #2c3e50; /* Dark blue background */
+            color: #ecf0f1; /* Light text color for contrast */
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            height: 500px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .card-body {
+            padding: 1.25rem;
+            background-color: #34495e; /* Darker blue for card background */
+            color: #ecf0f1; /* Light text color */
+        }
+        .card {
+            margin-bottom: 1rem;
+            border: 1px solid #bdc3c7; /* Silver border color */
+        }
+        .card-header {
+            background-color: #1abc9c; /* Teal header for cards */
+            color: #ecf0f1; /* Light text color */
+        }
+        .crime-card {
+            border-left: 5px solid;
+            background-color: #34495e; /* Darker blue background for crime cards */
+        }
+        .crime-card-theft {
+            border-color: red;
+        }
+        .crime-card-assault {
+            border-color: blue;
+        }
+        .crime-card-other {
+            border-color: green;
+        }
+        .sidebar {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 300px;
+            height: 100%;
+            background-color: #34495e; /* Darker blue sidebar */
+            border-left: 1px solid #bdc3c7; /* Silver border */
+            padding: 15px;
+            overflow-y: auto;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.3);
+        }
+        .map-container {
+            position: relative;
+        }
+        .map-controls {
+            margin-bottom: 15px;
+        }
+        .btn-primary {
+            background-color: #1abc9c; /* Teal button */
+            border-color: #16a085; /* Darker teal border */
+        }
+        .btn-primary:hover {
+            background-color: #16a085; /* Darker teal on hover */
+            border-color: #1abc9c; /* Lighter teal border on hover */
+        }
+        .container {
+            margin-top: 20px;
+            color: #ecf0f1; /* Light text color */
+        }
+        h1, h4 {
+            color: #ecf0f1; /* Light text color */
+        }
+    </style>
+    <script>
+        let heatmap;
+        let crimeMarkers = {};
+        let heatmapLayerOn = true;
+        let crimeLayerOn = true;
+        let map;
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 13.0827, lng: 80.2707 }, // Centered on Tamil Nadu
+                zoom: 8
+            });
+
+            let heatmapData = [];
+            let markersByCity = {};
+            let allCrimes = []; // Store all crimes for statistics
+
+            fetch('/crime-data')
+                .then(response => response.json())
+                .then(data => {
+                    allCrimes = data; // Save all crimes for statistics
+                    data.forEach(crime => {
+                        let markerColor = crime.crime_type === 'Theft' ? 'red' : (crime.crime_type === 'Assault' ? 'blue' : 'green');
+                        let marker = new google.maps.Marker({
+                            position: { lat: parseFloat(crime.latitude), lng: parseFloat(crime.longitude) },
+                            map: map,
+                            title: crime.city, // Use city as the title
+                            icon: `http://maps.google.com/mapfiles/ms/icons/${markerColor}-dot.png` // Custom marker
+                        });
+
+                        // Add to heatmap data
+                        heatmapData.push(new google.maps.LatLng(crime.latitude, crime.longitude));
+                        
+                        // Add marker to city-specific list
+                        if (!markersByCity[crime.city]) {
+                            markersByCity[crime.city] = [];
+                        }
+                        markersByCity[crime.city].push(marker);
+                    });
+
+                    // Initialize Heatmap
+                    heatmap = new google.maps.visualization.HeatmapLayer({
+                        data: heatmapData,
+                        map: map,
+                        radius: 20, // Adjust heatmap radius
+                        opacity: 0.6 // Adjust heatmap opacity
+                    });
+
+                    // Show crime details for all cities
+                    showCrimeDetails(markersByCity);
+
+                    // Update statistics
+                    updateStatistics(allCrimes);
+                });
+
+            fetch('/crime-counts')
+                .then(response => response.json())
+                .then(counts => {
+                    counts.forEach(location => {
+                        let marker = new google.maps.Marker({
+                            position: { lat: parseFloat(location.latitude), lng: parseFloat(location.longitude) },
+                            map: map,
+                            label: {
+                                text: location.count.toString(),
+                                color: 'white',
+                                fontSize: '14px',
+                                fontWeight: 'bold'
+                            },
+                            icon: {
+                                path: google.maps.SymbolPath.CIRCLE,
+                                fillColor: 'black',
+                                fillOpacity: 0.8,
+                                strokeWeight: 1,
+                                scale: 20 // Adjust size of circle
+                            }
+                        });
+
+                        if (!crimeMarkers[location.city]) {
+                            crimeMarkers[location.city] = [];
+                        }
+                        crimeMarkers[location.city].push(marker);
+                    });
+                });
+        }
+
+        function showCrimeDetails(markersByCity) {
+            fetch('/crime-summary')
+                .then(response => response.json())
+                .then(summary => {
+                    const detailsContainer = document.getElementById('crimeDetails');
+                    detailsContainer.innerHTML = '<h3>Crime Summary</h3>'; // Clear previous details
+
+                    Object.keys(markersByCity).forEach(city => {
+                        var crimesInCity = summary.filter(crime => crime.city === city);
+
+                        if (crimesInCity.length > 0) {
+                            const cityDiv = document.createElement('div');
+                            cityDiv.className = 'card mb-3';
+                            cityDiv.innerHTML = `
+                                <div class="card-header">
+                                    <h4 class="card-title">${city}</h4>
+                                </div>
+                                <div class="card-body">
+                                    ${crimesInCity.map(crime => `
+                                        <div class="card crime-card crime-card-${crime.crime_type.toLowerCase()} mb-2">
+                                            <div class="card-body">
+                                                <h5 class="card-title">${crime.crime_type}</h5>
+                                                <p class="card-text">Count: ${crime.count}</p>
+                                                <p class="card-text">City: ${crime.city}</p>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            `;
+                            detailsContainer.appendChild(cityDiv);
+                        }
+                    });
+                });
+        }
+
+        function updateStatistics(crimes) {
+            let totalCrimes = crimes.length;
+            let crimeCounts = {};
+            
+            crimes.forEach(crime => {
+                if (!crimeCounts[crime.crime_type]) {
+                    crimeCounts[crime.crime_type] = 0;
+                }
+                crimeCounts[crime.crime_type]++;
+            });
+            
+            let mostCommonCrime = Object.keys(crimeCounts).reduce((a, b) => crimeCounts[a] > crimeCounts[b] ? a : b);
+
+            document.getElementById('totalCrimes').textContent = totalCrimes;
+            document.getElementById('mostCommonCrime').textContent = mostCommonCrime;
+        }
+
+        function toggleHeatmap() {
+            heatmap.setMap(heatmapLayerOn ? null : map);
+            heatmapLayerOn = !heatmapLayerOn;
+        }
+
+        function toggleCrimeMarkers() {
+            Object.values(crimeMarkers).forEach(markers => {
+                markers.forEach(marker => marker.setMap(crimeLayerOn ? null : map));
+            });
+            crimeLayerOn = !crimeLayerOn;
+        }
+
+        function uploadData() {
+            var formData = new FormData();
+            var fileInput = document.getElementById('fileInput');
+
+            formData.append('file', fileInput.files[0]);
+
+            fetch('/upload-data', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message || data.error);
+                location.reload(); // Reload the page to refresh data
+            });
+        }
+
+        window.onload = function() {
+            initMap();
+        }
+    </script>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>Crime Mapping</h1>
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="sidebar">
+                <h4>Map Controls</h4>
+                <div class="map-controls">
+                    <button class="btn btn-primary" onclick="toggleHeatmap()">Toggle Heatmap</button>
+                    <button class="btn btn-primary mt-2" onclick="toggleCrimeMarkers()">Toggle Crime Markers</button>
+                </div>
+                <h4>Statistics</h4>
+                <p>Total Crimes: <span id="totalCrimes"></span></p>
+                <p>Most Common Crime: <span id="mostCommonCrime"></span></p>
+            </div>
+        </div>
+        
+        <!-- Section to display crime details -->
+        <div id="crimeDetails" class="mt-4"></div>
+
+        <!-- File Upload Form -->
+        <div class="mt-4">
+            <input type="file" id="fileInput" class="form-control-file">
+            <button onclick="uploadData()" class="btn btn-primary mt-2">Upload Crime Data</button>
+        </div>
+    </div>
+</body>
+</html>
